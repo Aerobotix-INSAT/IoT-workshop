@@ -1,0 +1,7 @@
+{
+  "name": "aerobotix-loadtest",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node loadtest.mjs" },
+  "dependencies": { "mqtt": "5.10.1" }
+}

@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>Aerobotix IoT Live</title>
+<link rel="icon" href="assets/aerobotix-logo.png">
+<script src="vendor/mqtt.min.js"></script>
+<script src="config.js"></script>
+<style>
+  @font-face { font-family: "Inter"; font-weight: 400; font-display: swap; src: url(assets/fonts/inter-latin-400-normal.woff2) format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 600; font-display: swap; src: url(assets/fonts/inter-latin-600-normal.woff2) format("woff2"); }
+  @font-face { font-family: "Space Grotesk"; font-weight: 700; font-display: swap; src: url(assets/fonts/space-grotesk-latin-700-normal.woff2) format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url(assets/fonts/jetbrains-mono-latin-400-normal.woff2) format("woff2"); }
+
+  :root {
+    --bg: #0b1020; --panel: #121a33; --panel-2: #18213f; --text: #e8ecf8; --muted: #8a94b3;
+    --border: #243056; --accent: #00b4ff; --accent-2: #7c3aed;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444; --led: #facc15;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100dvh;
+    font: 16px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 10px; }
+  header img { height: 26px; width: auto; display: block; }
+  h1, h2 { font-family: "Space Grotesk", Inter, sans-serif; margin: 0; }
+  h1 { font-size: 26px; line-height: 1.15; }
+  h2 { font-size: 17px; }
+  p { margin: 6px 0 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  code, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-top: 14px; }
+  .card .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .step { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+          background: var(--accent); color: #001018; font-weight: 700; font-size: 13px; margin-right: 8px; flex: none; }
+  .title { display: flex; align-items: center; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+          background: var(--panel-2); border: 1px solid var(--border); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+
+  input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+          padding: 14px; width: 100%; font-size: 18px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; font-weight: 600; font-size: 17px; border: 0; border-radius: 12px; padding: 15px 16px; width: 100%;
+           cursor: pointer; background: var(--accent); color: #001018; touch-action: manipulation; }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button + button { margin-top: 10px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; margin-top: 0 !important; }
+
+  .err { color: var(--bad); font-size: 14px; margin-top: 8px; min-height: 1em; }
+  .hidden { display: none !important; }
+
+  /* sensor */
+  .gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .gauge { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; text-align: center; }
+  .gauge .k { font-size: 12px; color: var(--muted); }
+  .gauge .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bubble { position: relative; height: 120px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border);
+            margin-bottom: 12px; overflow: hidden; }
+  .bubble::before, .bubble::after { content: ""; position: absolute; background: var(--border); }
+  .bubble::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .bubble::after { top: 50%; left: 0; right: 0; height: 1px; }
+  .bubble i { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px; border-radius: 50%;
+              background: var(--accent); box-shadow: 0 0 16px var(--accent); transition: transform .12s linear; }
+  input[type=range] { padding: 0; height: 36px; accent-color: var(--accent); background: transparent; border: 0; }
+
+  /* led */
+  .ledbox { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+  .bulb { width: 64px; height: 64px; border-radius: 50%; background: #2a2f3d; flex: none;
+          box-shadow: inset 0 0 0 3px rgba(0,0,0,.35); transition: background .2s, box-shadow .2s; }
+  .bulb.on { background: var(--led); box-shadow: 0 0 28px var(--led), inset 0 0 0 3px rgba(0,0,0,.15); }
+  .ledtxt b { font-size: 22px; display: block; }
+
+  /* raw messages */
+  #sent { list-style: none; padding: 0; margin: 0; }
+  #sent li { padding: 6px 0; border-top: 1px solid var(--border); word-break: break-all; }
+  #sent li:first-child { border-top: 0; }
+  #sent .tp { color: var(--accent); }
+  details summary { cursor: pointer; font-weight: 600; }
+  .note { border-left: 3px solid var(--accent-2); padding: 8px 12px; background: var(--panel-2); border-radius: 0 10px 10px 0;
+          font-size: 14px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="assets/aerobotix-logo.png" alt="Aerobotix">
+    <span class="pill" id="connPill"><span class="dot" id="connDot"></span><span id="connText">Offline</span></span>
+  </header>
+
+  <!-- ============ JOIN ============ -->
+  <section id="joinView">
+    <h1>You are now an IoT device 📱</h1>
+    <p class="muted">Your phone will talk to a real cloud MQTT broker, just like the ESP32.</p>
+    <div class="card">
+      <div class="title"><span class="step">1</span><h2>Pick a name</h2></div>
+      <p class="muted" style="margin-bottom:10px">It shows up on the projector.</p>
+      <form id="joinForm" autocomplete="off">
+        <input id="nameInput" name="aerobotix-nick" autocomplete="off" maxlength="16" placeholder="e.g. Sarra" enterkeyhint="go" autocapitalize="words" required>
+        <div class="err" id="joinErr"></div>
+        <button id="joinBtn" type="submit">Join</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ DEVICE ============ -->
+  <section id="deviceView" class="hidden">
+    <h1 id="hello">Hi!</h1>
+    <p class="muted">Your topic: <code id="myTopic"></code></p>
+    <div class="err" id="topErr"></div>
+
+    <!-- SENSOR -->
+    <div class="card">
+      <div class="head">
+        <div class="title"><span class="step">2</span><h2>Send my sensor</h2></div>
+        <span class="pill hidden" id="sensorPill"><span class="dot ok"></span><span id="sensorLeft"></span></span>
+      </div>
+      <div class="bubble" id="bubble"><i id="bubbleDot"></i></div>
+      <div class="gauges">
+        <div class="gauge"><div class="k">tilt</div><div class="v" id="gTilt">–</div></div>
+        <div class="gauge"><div class="k">roll</div><div class="v" id="gRoll">–</div></div>
+        <div class="gauge"><div class="k">shake</div><div class="v" id="gAcc">–</div></div>
+      </div>
+      <div id="sliderBox" class="hidden">
+        <p class="muted">No motion sensor found. Drag instead:</p>
+        <input type="range" id="slider" min="-90" max="90" value="0">
+      </div>
+      <button id="sensorBtn" disabled>Start sending</button>
+      <p class="muted" id="sensorHint" style="margin-top:8px">1 message per second, stops after 3 minutes.</p>
+    </div>
+
+    <!-- LED -->
+    <div class="card">
+      <div class="head">
+        <div class="title"><span class="step">3</span><h2>The ESP32 LED</h2></div>
+        <span class="pill"><span class="dot" id="espDot"></span><span id="espText">waiting…</span></span>
+      </div>
+      <div class="ledbox">
+        <div class="bulb" id="bulb"></div>
+        <div class="ledtxt"><b id="ledText">?</b><span class="muted">Everyone controls the same LED.</span></div>
+      </div>
+      <button id="ledBtn" disabled>Toggle the LED</button>
+    </div>
+
+    <!-- LWT -->
+    <div class="card">
+      <div class="title"><span class="step">4</span><h2>Disappear</h2></div>
+      <p class="muted">Close this tab and watch the projector: you turn <b>offline</b>. Your phone didn't say goodbye.
+        The broker did it for you with the <b>Last Will</b> it got when you connected.</p>
+      <div class="note">Same thing happens when someone unplugs the ESP32.</div>
+    </div>
+
+    <!-- RAW -->
+    <div class="card">
+      <details>
+        <summary>What my phone sent (raw MQTT)</summary>
+        <ul id="sent" class="mono" style="margin-top:10px"></ul>
+      </details>
+    </div>
+
+    <div class="card">
+      <button class="secondary" id="leaveBtn">Leave politely (no Last Will)</button>
+      <p class="muted" style="margin-top:8px">Sends <code>offline</code> itself, then disconnects. Compare with closing the tab.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+// ---------------- config (URL params override, handy for local tests) ----------------
+const C = Object.assign({}, window.WORKSHOP_CONFIG || {});
+const qs = new URLSearchParams(location.search);
+for (const k of ["host", "port", "path", "esp", "proto"]) if (qs.get(k)) C[k === "esp" ? "espName" : k] = qs.get(k);
+const PROTO = C.proto === "ws" ? "ws" : "wss";
+const PREFIX = C.topicPrefix || "aerobotix";
+const ESP = String(C.espName || "esp32");
+const SENSOR_MS = Math.max(500, Number(C.sensorIntervalMs) || 1000);
+const AUTOSTOP_MS = Number(C.sensorAutoStopMs) || 180000;
+const LED_COOLDOWN = Number(C.ledCooldownMs) || 2000;
+
+// ---------------- identity ----------------
+// Topic id = slug of the name + 3 random chars, so two "Ali"s never collide.
+// Client id adds a per-tab suffix, so two tabs of the same phone don't kick each other off.
+function slug(s) {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 12) || "guest";
+}
+const rnd = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("");
+function store(kind, key, val) {
+  try { const s = kind === "local" ? localStorage : sessionStorage;
+        if (val === undefined) return JSON.parse(s.getItem(key) || "null");
+        if (val === null) s.removeItem(key); else s.setItem(key, JSON.stringify(val)); } catch { return null; }
+}
+let me = store("local", "aerobotix-me");      // { name, id }
+let tab = store("session", "aerobotix-tab") || rnd(4);
+store("session", "aerobotix-tab", tab);
+
+let client = null;
+let T = {};                                   // topics
+let espLed = null, espStatus = null;
+
+// ---------------- UI helpers ----------------
+function setConn(state, text) {
+  $("connDot").className = "dot " + state;
+  $("connText").textContent = text;
+  const on = state === "ok";
+  $("sensorBtn").disabled = !on && !sensor.running;
+  updateLedBtn();
+}
+const sentList = [];
+function showSent(topic, payload, opts) {
+  sentList.unshift({ topic, payload, opts });
+  if (sentList.length > 6) sentList.pop();
+  const ul = $("sent");
+  ul.textContent = "";
+  for (const m of sentList) {
+    const li = document.createElement("li");
+    const tp = document.createElement("span"); tp.className = "tp"; tp.textContent = m.topic;
+    li.append(tp, document.createTextNode(`  ${m.payload}  ${m.opts}`));
+    ul.appendChild(li);
+  }
+}
+function pub(topic, payload, qos = 0, retain = false) {
+  if (!client || !client.connected) return false;
+  client.publish(topic, payload, { qos, retain });
+  showSent(topic, payload, `(QoS ${qos}${retain ? ", retained" : ""})`);
+  return true;
+}
+
+// ---------------- join ----------------
+$("joinForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("nameInput").value.trim().replace(/\s+/g, " ").slice(0, 16);
+  if (!name) { $("joinErr").textContent = "Type a name first."; return; }
+  if (!C.host || /x{6,}/.test(C.host)) { $("joinErr").textContent = "The broker is not configured yet. Ask the instructor."; return; }
+  const prevName = me && me.name;
+  if (!me || prevName !== name) me = { name, id: slug(name) + "-" + rnd(3) };
+  store("local", "aerobotix-me", me);
+  start();
+});
+
+function start() {
+  T = {
+    base: `${PREFIX}/${me.id}`,
+    status: `${PREFIX}/${me.id}/status`,
+    info: `${PREFIX}/${me.id}/info`,
+    telemetry: `${PREFIX}/${me.id}/telemetry`,
+    espLedSet: `${PREFIX}/${ESP}/led/set`,
+    espLedState: `${PREFIX}/${ESP}/led/state`,
+    espStatus: `${PREFIX}/${ESP}/status`,
+  };
+  $("joinView").classList.add("hidden");
+  $("deviceView").classList.remove("hidden");
+  $("hello").textContent = `Hi ${me.name}!`;
+  $("myTopic").textContent = T.base + "/…";
+  connect();
+}
+
+// ---------------- MQTT ----------------
+function connect() {
+  if (client) return;
+  const url = `${PROTO}://${C.host}:${C.port}${C.path || "/mqtt"}`;
+  setConn("warn", "Connecting…");
+  client = mqtt.connect(url, {
+    clientId: `phone-${me.id}-${tab}`,
+    username: C.username || undefined,
+    password: C.password || undefined,
+    clean: true,
+    keepalive: 20,                                   // broker notices a dead phone after ~30 s
+    connectTimeout: 15000,
+    reconnectPeriod: 2000 + Math.floor(Math.random() * 3000),   // jitter: 100 phones don't reconnect in sync
+    will: { topic: T.status, payload: "offline", qos: 1, retain: true },
+  });
+  client.on("connect", () => {
+    setConn("ok", "Online");
+    pub(T.info, JSON.stringify({ kind: "phone", name: me.name }), 1, true);
+    pub(T.status, "online", 1, true);
+    client.subscribe([T.espLedState, T.espStatus], { qos: 0 }, (err) => {
+      if (err) $("topErr").textContent = "Could not subscribe to the LED state (check the participant ACL).";
+    });
+  });
+  client.on("reconnect", () => setConn("warn", "Reconnecting…"));
+  client.on("offline", () => setConn("bad", "Offline"));
+  client.on("close", () => { if (client && !client.connected) setConn("bad", "Offline"); });
+  client.on("error", (e) => {
+    const msg = String(e && e.message || e);
+    if (/not authori|bad user|password/i.test(msg)) {
+      // Don't let 100 phones hammer the broker with a wrong password.
+      const c = client; client = null; if (c) c.end(true);
+      setConn("bad", "Refused");
+      alertOnce("The broker refused the login. Tell the instructor.");
+    }
+  });
+  client.on("message", (topic, buf) => {
+    const s = buf.toString().trim();
+    if (topic === T.espLedState) { espLed = s.toUpperCase() === "ON"; renderLed(); }
+    else if (topic === T.espStatus) { espStatus = s; renderLed(); }
+  });
+}
+let alerted = false;
+function alertOnce(text) { if (alerted) return; alerted = true; $("topErr").textContent = text; }
+
+// Phones freeze background tabs. Coming back -> reconnect right away instead of waiting.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && client && !client.connected) client.reconnect();
+});
+
+// ---------------- LED ----------------
+let ledReadyAt = 0, ledTimer = null;
+function renderLed() {
+  $("bulb").className = "bulb" + (espLed ? " on" : "");
+  $("ledText").textContent = espLed === null ? "?" : espLed ? "ON" : "OFF";
+  const online = espStatus === "online";
+  $("espDot").className = "dot " + (online ? "ok" : espStatus === "offline" ? "bad" : "");
+  $("espText").textContent = `${ESP} · ${espStatus || "unknown"}`;
+}
+function updateLedBtn() {
+  const wait = ledReadyAt - Date.now();
+  const btn = $("ledBtn");
+  btn.disabled = !(client && client.connected) || wait > 0;
+  btn.textContent = wait > 0 ? `Wait ${Math.ceil(wait / 1000)} s…` : "Toggle the LED";
+}
+$("ledBtn").addEventListener("click", () => {
+  if (Date.now() < ledReadyAt) return;
+  if (!pub(T.espLedSet, "TOGGLE", 1, false)) return;
+  if (navigator.vibrate) navigator.vibrate(30);
+  ledReadyAt = Date.now() + LED_COOLDOWN;
+  updateLedBtn();
+  clearInterval(ledTimer);
+  ledTimer = setInterval(() => { updateLedBtn(); if (Date.now() >= ledReadyAt) clearInterval(ledTimer); }, 250);
+});
+
+// ---------------- sensor ----------------
+const sensor = { running: false, beta: 0, gamma: 0, acc: 0, got: false, timer: null, stopAt: 0, count: 0, fake: false };
+const r1 = (v) => Math.round(v * 10) / 10;
+
+function onOrient(e) {
+  if (e.beta == null && e.gamma == null) return;
+  sensor.got = true;
+  sensor.beta = e.beta || 0;     // front/back tilt, -180..180
+  sensor.gamma = e.gamma || 0;   // left/right roll, -90..90
+}
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity || e.acceleration;
+  if (!a || a.x == null) return;
+  sensor.got = true;
+  // shake = how far we are from a phone lying still (|a| = 9.81)
+  const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+  sensor.acc = Math.max(sensor.acc * 0.6, Math.abs(mag - 9.81));
+}
+$("slider").addEventListener("input", (e) => { sensor.beta = Number(e.target.value); sensor.gamma = 0; });
+
+async function askPermission() {
+  // iOS 13+ needs an explicit permission, triggered by a tap.
+  const asks = [];
+  if (typeof DeviceOrientationEvent !== "undefined" && DeviceOrientationEvent.requestPermission) asks.push(DeviceOrientationEvent.requestPermission());
+  if (typeof DeviceMotionEvent !== "undefined" && DeviceMotionEvent.requestPermission) asks.push(DeviceMotionEvent.requestPermission());
+  if (!asks.length) return true;
+  try { return (await Promise.all(asks)).every(r => r === "granted"); } catch { return false; }
+}
+
+async function startSensor() {
+  const ok = await askPermission();
+  window.addEventListener("deviceorientation", onOrient);
+  window.addEventListener("devicemotion", onMotion);
+  sensor.running = true;
+  sensor.stopAt = Date.now() + AUTOSTOP_MS;
+  // No motion data after 1.5 s (laptop, or permission denied) -> slider fallback
+  setTimeout(() => {
+    if (sensor.running && !sensor.got) {
+      sensor.fake = true;
+      $("sliderBox").classList.remove("hidden");
+      if (!ok) $("sensorHint").textContent = "Motion permission was refused, so use the slider.";
+    }
+  }, 1500);
+  sensor.timer = setInterval(tick, SENSOR_MS);
+  $("sensorBtn").textContent = "Stop sending";
+  $("sensorBtn").classList.add("secondary");
+  $("sensorPill").classList.remove("hidden");
+  tick();
+}
+function stopSensor() {
+  sensor.running = false;
+  clearInterval(sensor.timer);
+  window.removeEventListener("deviceorientation", onOrient);
+  window.removeEventListener("devicemotion", onMotion);
+  $("sensorBtn").textContent = "Start sending";
+  $("sensorBtn").classList.remove("secondary");
+  $("sensorPill").classList.add("hidden");
+  $("sensorBtn").disabled = !(client && client.connected);
+}
+function tick() {
+  const left = sensor.stopAt - Date.now();
+  if (left <= 0) { stopSensor(); $("sensorHint").textContent = "Stopped after 3 minutes to save the broker's quota. Tap to start again."; return; }
+  $("sensorLeft").textContent = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
+  const data = { tilt: r1(sensor.beta), roll: r1(sensor.gamma), shake: r1(sensor.acc), count: ++sensor.count };
+  pub(T.telemetry, JSON.stringify(data), 0, false);
+}
+$("sensorBtn").addEventListener("click", () => sensor.running ? stopSensor() : startSensor());
+
+// live preview at screen rate, independent of the publish rate
+(function draw() {
+  $("gTilt").textContent = sensor.running ? Math.round(sensor.beta) + "°" : "–";
+  $("gRoll").textContent = sensor.running ? Math.round(sensor.gamma) + "°" : "–";
+  $("gAcc").textContent = sensor.running ? sensor.acc.toFixed(1) : "–";
+  const x = Math.max(-1, Math.min(1, sensor.gamma / 45)) * 45, y = Math.max(-1, Math.min(1, sensor.beta / 45)) * 40;
+  $("bubbleDot").style.transform = `translate(${x}px, ${y}px)`;
+  requestAnimationFrame(draw);
+})();
+
+// ---------------- leave politely ----------------
+$("leaveBtn").addEventListener("click", () => {
+  if (sensor.running) stopSensor();
+  if (client) {
+    if (client.connected) pub(T.status, "offline", 1, true);
+    const c = client; client = null;
+    c.end(false);                 // sends DISCONNECT -> broker discards the Last Will
+  }
+  setConn("", "Left");
+  $("deviceView").classList.add("hidden");
+  $("joinView").classList.remove("hidden");
+  $("nameInput").value = me ? me.name : "";
+});
+
+// ---------------- boot ----------------
+if (me && me.name) $("nameInput").value = me.name;
+renderLed();
+setConn("", "Offline");
+})();
+</script>
+</body>
+</html>

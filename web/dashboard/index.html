@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aerobotix IoT Dashboard</title>
+<link rel="icon" href="../assets/aerobotix-logo.png">
+<script src="../vendor/mqtt.min.js"></script>
+<script src="../vendor/chart.umd.min.js"></script>
+<script src="../config.js"></script>
+<style>
+  :root {
+    --bg: #f4f6fa; --panel: #ffffff; --text: #18202e; --muted: #667085;
+    --border: #e3e7ef; --accent: #0284c7; --ok: #16a34a; --bad: #dc2626; --warn: #d97706;
+    --code: #f1f3f8; --grid: rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1020; --panel: #121a33; --text: #e8ecf8; --muted: #8a94b3;
+      --border: #243056; --accent: #00b4ff; --ok: #22c55e; --bad: #ef4444; --warn: #f59e0b;
+      --code: #18213f; --grid: rgba(255,255,255,.08);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1020; --panel: #121a33; --text: #e8ecf8; --muted: #8a94b3;
+    --border: #243056; --accent: #00b4ff; --ok: #22c55e; --bad: #ef4444; --warn: #f59e0b;
+    --code: #18213f; --grid: rgba(255,255,255,.08);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
+           display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header h1 span { color: var(--accent); }
+  .stats { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; }
+  .phead { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 160px; }
+  label.inline { flex-direction: row; align-items: center; flex: none; font-size: 13px; gap: 6px; }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+                            border-radius: 8px; padding: 8px 10px; width: 100%; }
+  input[type=checkbox] { width: auto; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer;
+           background: var(--accent); color: #fff; }
+  button.secondary { background: var(--code); color: var(--text); border: 1px solid var(--border); }
+  button.small { padding: 5px 10px; font-size: 12px; }
+  button.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+          background: var(--code); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
+  .hidden { display: none !important; }
+  #connPanel.collapsed .row, #connPanel.collapsed #hint { display: none; }
+
+  /* ESP32 cards */
+  #esps { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .device { border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--bg); }
+  .device .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+  .device .name { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+  .metric .k { font-size: 11px; color: var(--muted); }
+  .metric .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .device .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .device .actions select { width: auto; flex: 1; }
+  .led { width: 16px; height: 16px; border-radius: 50%; background: #555; box-shadow: inset 0 0 0 2px rgba(0,0,0,.2); flex: none; }
+  .led.on { background: #facc15; box-shadow: 0 0 12px #facc15; }
+
+  /* phone tiles: compact so 100 fit on a projector */
+  #phones { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .phone { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg);
+           display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; transition: opacity .3s; }
+  .phone.off { opacity: .45; }
+  .phone .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .phone .vals { grid-column: 1 / -1; font: 12px/1.3 ui-monospace, Menlo, monospace; color: var(--muted); white-space: nowrap;
+                 overflow: hidden; text-overflow: ellipsis; }
+  .phone .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--code); position: relative; overflow: hidden; }
+  .phone .bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--c, var(--accent)); }
+  .phone.fresh { border-color: var(--c, var(--accent)); }
+
+  .muted { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: 10px; }
+  #log { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); border-radius: 8px;
+         padding: 10px; height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  #log .t { color: var(--accent); } #log .out { color: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .chartbox { position: relative; height: 320px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Aerobotix</span> IoT Dashboard</h1>
+  <div class="stats">
+    <span class="pill" title="ESP32 boards online"><span class="dot ok"></span>ESP32 <b id="sEsp">0</b></span>
+    <span class="pill" title="Phones online"><span class="dot ok"></span>Phones <b id="sPhones">0</b></span>
+    <span class="pill" title="Messages received per second">msg/s <b id="sRate">0</b></span>
+    <span class="pill"><span class="dot" id="connDot"></span><span id="connText">Disconnected</span></span>
+  </div>
+</header>
+
+<main>
+  <!-- CONNECTION -->
+  <section class="panel" id="connPanel">
+    <div class="phead">
+      <h2>1 · Connect to EMQX (WebSocket over TLS)</h2>
+      <button class="secondary small hidden" id="btnShowConn">Show settings</button>
+    </div>
+    <div class="row">
+      <label style="flex:3 1 280px">Address (from Overview page)
+        <input id="host" placeholder="xxxxxxxx.ala.eu-central-1.emqxsl.com"></label>
+      <label style="flex:0 1 90px">WSS port <input id="port" value="8084"></label>
+      <label>Username <input id="user" placeholder="dashboard"></label>
+      <label>Password <input id="pass" type="password"></label>
+      <label>Subscribe to <input id="sub" value="aerobotix/#"></label>
+      <button id="btnConnect">Connect</button>
+      <button id="btnDisconnect" class="secondary" disabled>Disconnect</button>
+    </div>
+    <p class="muted" id="hint">The password is not saved. Client ID: <code id="cid"></code></p>
+  </section>
+
+  <!-- ESP32 -->
+  <section class="panel">
+    <div class="phead"><h2>2 · ESP32 boards</h2></div>
+    <div id="esps"><div class="empty">No ESP32 yet. Connect, then power your board.</div></div>
+  </section>
+
+  <!-- PHONES -->
+  <section class="panel">
+    <div class="phead">
+      <h2>3 · Phones in the room</h2>
+      <div class="row" style="align-items:center">
+        <label class="inline"><input type="checkbox" id="showOffline"> show offline</label>
+        <button class="danger small" id="btnClean" disabled title="Delete the retained messages of offline phones">Clean up offline</button>
+      </div>
+    </div>
+    <div id="phones"><div class="empty">No phones yet. Show the QR code!</div></div>
+  </section>
+
+  <!-- CHART -->
+  <section class="panel">
+    <div class="phead">
+      <h2>4 · Live chart</h2>
+      <select id="metric" style="width:auto">
+        <option value="tilt">📱 Tilt (°)</option>
+        <option value="roll">📱 Roll (°)</option>
+        <option value="shake">📱 Shake</option>
+        <option value="temp">Temperature (°C)</option>
+        <option value="hum">Humidity (%)</option>
+        <option value="analog">Analog (raw)</option>
+        <option value="rssi">Wi-Fi RSSI (dBm)</option>
+      </select>
+    </div>
+    <div class="chartbox"><canvas id="chart"></canvas></div>
+  </section>
+
+  <div class="grid2">
+    <!-- PUBLISH -->
+    <section class="panel">
+      <div class="phead"><h2>5 · Publish a message</h2></div>
+      <div class="row">
+        <label style="flex:1 1 100%">Topic <input id="pubTopic" value="aerobotix/amine/led/set"></label>
+        <label style="flex:1 1 100%">Payload <textarea id="pubPayload" rows="2">TOGGLE</textarea></label>
+        <label style="flex:0 1 90px">QoS
+          <select id="pubQos"><option>0</option><option selected>1</option><option>2</option></select></label>
+        <label style="flex:0 1 110px">Retain
+          <select id="pubRetain"><option value="false">no</option><option value="true">yes</option></select></label>
+        <button id="btnPublish" disabled>Publish</button>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section class="panel">
+      <div class="phead">
+        <h2>6 · Message log</h2>
+        <div class="row" style="align-items:center">
+          <label class="inline"><input type="checkbox" id="logTelemetry" checked> telemetry</label>
+          <label class="inline"><input type="checkbox" id="logPause"> pause</label>
+          <button class="secondary small" id="btnClear">Clear</button>
+        </div>
+      </div>
+      <div id="log"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const CFG = window.WORKSHOP_CONFIG || {};
+const PREFIX = CFG.topicPrefix || "aerobotix";
+const MAX_POINTS = 60;              // per device per metric
+const CHART_WINDOW_MS = 90_000;     // only draw devices that sent data in the last 90 s
+const RENDER_MS = 300;              // the UI repaints at most ~3x per second, whatever the message rate
+const MAX_PAYLOAD = 2048;
+const clientId = "dashboard-" + Math.random().toString(16).slice(2, 8);
+$("cid").textContent = clientId;
+
+const qs = new URLSearchParams(location.search);
+const PROTO = qs.get("proto") === "ws" ? "ws" : "wss";
+
+let client = null;
+// name -> { kind:"esp32"|"phone"|"?", label, status, telemetry, led, lastSeen, series:{metric:[{x,y}]}, hue }
+const devices = new Map();
+const dirty = new Set();
+let layoutDirty = false;
+
+// ---------- remember non-secret fields (config.js pre-fills the first time) ----------
+const saved = (() => { try { return JSON.parse(localStorage.getItem("iotdash") || "{}"); } catch { return {}; } })();
+const defaults = { host: CFG.host && !/x{6,}/.test(CFG.host) ? CFG.host : "", port: CFG.port || 8084 };
+for (const k of ["host", "port", "user", "sub"]) {
+  const v = qs.get(k) || saved[k] || defaults[k];
+  if (v) $(k).value = v;
+}
+if (CFG.espName) $("pubTopic").value = `${PREFIX}/${CFG.espName}/led/set`;
+function save() {
+  try { localStorage.setItem("iotdash", JSON.stringify({ host: $("host").value, port: $("port").value,
+        user: $("user").value, sub: $("sub").value })); } catch {}
+}
+
+// ---------- connection ----------
+function setConn(state, text) {
+  $("connDot").className = "dot " + state;
+  $("connText").textContent = text;
+  const on = state === "ok";
+  $("btnPublish").disabled = !on;
+  $("btnClean").disabled = !on;
+  $("btnDisconnect").disabled = !client;
+  $("btnConnect").disabled = !!client;
+  for (const b of document.querySelectorAll(".needconn")) b.disabled = !on;
+}
+
+$("btnConnect").onclick = () => {
+  const host = $("host").value.trim().replace(/^wss?:\/\//, "").replace(/[:/].*$/, "");
+  const port = $("port").value.trim();
+  if (!host) { $("host").focus(); log("enter your deployment address", "out"); return; }
+  $("host").value = host;
+  save();
+  const url = `${PROTO}://${host}:${port}/mqtt`;
+  log(`connecting to ${url} ...`, "out");
+
+  client = mqtt.connect(url, {
+    clientId,
+    username: $("user").value.trim() || undefined,
+    password: $("pass").value || undefined,
+    clean: true,
+    keepalive: 30,
+    reconnectPeriod: 4000,
+    connectTimeout: 15000,
+  });
+
+  client.on("connect", () => {
+    setConn("ok", "Connected");
+    $("connPanel").classList.add("collapsed");
+    $("btnShowConn").classList.remove("hidden");
+    const sub = $("sub").value.trim() || `${PREFIX}/#`;
+    client.subscribe(sub, { qos: 0 }, (err, granted) => {
+      const bad = err || (granted && granted.some(g => g.qos === 128));
+      log(bad ? `subscribe to ${sub} REFUSED (check the dashboard user's ACL)` : `subscribed to ${sub}`, "out");
+    });
+  });
+  client.on("reconnect", () => setConn("warn", "Reconnecting…"));
+  client.on("offline", () => setConn("bad", "Offline"));
+  client.on("close", () => { if (client && !client.connected) setConn("bad", "Disconnected"); });
+  client.on("error", (e) => {
+    log(`error: ${e.message}`, "out");
+    if (/not authori|bad user|password/i.test(e.message)) {
+      const c = client; client = null; c.end(true);
+      setConn("bad", "Login refused");
+      $("connPanel").classList.remove("collapsed");
+    }
+  });
+  client.on("message", onMessage);
+  setConn("warn", "Connecting…");
+};
+$("btnDisconnect").onclick = () => {
+  if (client) { const c = client; client = null; c.end(true); }
+  setConn("", "Disconnected");
+  $("connPanel").classList.remove("collapsed");
+};
+$("btnShowConn").onclick = () => $("connPanel").classList.toggle("collapsed");
+
+// ---------- incoming ----------
+let msgCount = 0;
+function hueOf(name) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; }
+function dev(name) {
+  let d = devices.get(name);
+  if (!d) {
+    d = { kind: "?", label: name, status: "?", telemetry: {}, led: null, lastSeen: 0, series: {}, hue: hueOf(name) };
+    devices.set(name, d);
+    layoutDirty = true;
+  }
+  return d;
+}
+
+function onMessage(topic, payloadBuf, packet) {
+  msgCount++;
+  if (payloadBuf.length > MAX_PAYLOAD) return;
+  const payload = payloadBuf.toString();
+  const parts = topic.split("/");
+  const isTelemetry = parts[2] === "telemetry";
+  if (!isTelemetry || $("logTelemetry").checked) log(`${topic}${packet.retain ? " [retained]" : ""}  ${payload}`);
+
+  if (parts[0] !== PREFIX || parts.length < 3) return;
+  const name = parts[1];
+  const sub = parts.slice(2).join("/");
+
+  // Empty retained payload = someone deleted this device's retained message.
+  if (payload === "" && (sub === "status" || sub === "info")) {
+    if (devices.has(name)) { devices.delete(name); removeCard(name); layoutDirty = true; }
+    return;
+  }
+
+  const d = dev(name);
+  if (sub === "status") {
+    if (d.status !== payload) layoutDirty = true;
+    d.status = payload;
+  } else if (sub === "info") {
+    try {
+      const info = JSON.parse(payload);
+      if (info.kind === "phone" && d.kind !== "phone") { d.kind = "phone"; layoutDirty = true; }
+      if (typeof info.name === "string") d.label = info.name.slice(0, 24);
+    } catch {}
+  } else if (sub === "led/state") {
+    d.led = payload.toUpperCase() === "ON";
+    if (d.kind !== "esp32") { d.kind = "esp32"; layoutDirty = true; }
+  } else if (sub === "telemetry") {
+    let data;
+    try { data = JSON.parse(payload); } catch { return; }
+    if (!data || typeof data !== "object") return;
+    d.telemetry = data;
+    d.lastSeen = Date.now();
+    if (typeof data.led === "boolean") d.led = data.led;
+    if (d.kind === "?" && ("temp" in data || "analog" in data || "rssi" in data)) { d.kind = "esp32"; layoutDirty = true; }
+    if (d.kind === "?" && ("tilt" in data || "roll" in data)) { d.kind = "phone"; layoutDirty = true; }
+    for (const [k, v] of Object.entries(data)) {
+      if (typeof v !== "number" || !isFinite(v)) continue;
+      const s = (d.series[k] ||= []);
+      s.push({ x: d.lastSeen, y: v });
+      if (s.length > MAX_POINTS) s.shift();
+    }
+    chartDirty = true;
+  } else return;
+  dirty.add(name);
+}
+
+// ---------- render loop (decoupled from message rate) ----------
+const LABELS = { temp: ["Temp", "°C"], hum: ["Hum", "%"], analog: ["Analog", ""], rssi: ["RSSI", "dBm"],
+                 uptime: ["Uptime", "s"], count: ["Msgs", ""], tilt: ["Tilt", "°"], roll: ["Roll", "°"], shake: ["Shake", ""] };
+const fmt = (v) => Number.isInteger(v) ? String(v) : v.toFixed(1);
+const cardId = (name) => "dev-" + name.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+function removeCard(name) { document.getElementById(cardId(name))?.remove(); }
+
+function renderEsp(name, d) {
+  const box = $("esps");
+  let card = document.getElementById(cardId(name));
+  if (card && card.dataset.kind !== "esp32") { card.remove(); card = null; }
+  if (!card) {
+    box.querySelector(".empty")?.remove();
+    card = document.createElement("div");
+    card.className = "device";
+    card.id = cardId(name);
+    card.dataset.kind = "esp32";
+    card.innerHTML = `
+      <div class="top">
+        <span class="name"></span>
+        <span class="pill"><span class="dot"></span><span class="st"></span></span>
+      </div>
+      <div class="metrics"></div>
+      <div class="actions">
+        <span class="led"></span>
+        <button class="ledbtn needconn">Toggle LED</button>
+        <select class="interval needconn" title="Publish interval">
+          <option value="">interval…</option>
+          <option value="1000">1 s</option><option value="2000">2 s</option>
+          <option value="5000">5 s</option><option value="10000">10 s</option><option value="30000">30 s</option>
+        </select>
+      </div>
+      <div class="muted seen" style="margin-top:8px"></div>`;
+    card.querySelector(".name").textContent = name;
+    card.querySelector(".ledbtn").onclick = () =>
+      publish(`${PREFIX}/${name}/led/set`, devices.get(name)?.led ? "OFF" : "ON", 1, false);
+    card.querySelector(".interval").onchange = (e) => {
+      if (e.target.value) publish(`${PREFIX}/${name}/interval/set`, e.target.value, 1, false);
+      e.target.value = "";
+    };
+    const on = !!(client && client.connected);
+    card.querySelectorAll(".needconn").forEach(b => b.disabled = !on);
+    box.appendChild(card);
+  }
+  const online = d.status === "online";
+  card.querySelector(".dot").className = "dot " + (online ? "ok" : d.status === "offline" ? "bad" : "");
+  card.querySelector(".st").textContent = d.status;
+  card.querySelector(".led").className = "led" + (d.led ? " on" : "");
+  const m = card.querySelector(".metrics");
+  m.textContent = "";
+  for (const [k, v] of Object.entries(d.telemetry)) {
+    if (typeof v !== "number") continue;
+    const [label, unit] = LABELS[k] || [k, ""];
+    const el = document.createElement("div");
+    el.className = "metric";
+    el.innerHTML = `<div class="k"></div><div class="v"></div>`;
+    el.querySelector(".k").textContent = label;
+    el.querySelector(".v").textContent = fmt(v) + (unit ? " " + unit : "");
+    m.appendChild(el);
+  }
+  card.querySelector(".seen").textContent = d.lastSeen ? "last telemetry: " + new Date(d.lastSeen).toLocaleTimeString() : "";
+}
+
+function renderPhone(name, d) {
+  let tile = document.getElementById(cardId(name));
+  if (tile && tile.dataset.kind !== "phone") { tile.remove(); tile = null; }
+  if (!tile) {
+    tile = document.createElement("div");
+    tile.className = "phone";
+    tile.id = cardId(name);
+    tile.dataset.kind = "phone";
+    tile.innerHTML = `<span class="dot"></span><span class="nm"></span><div class="vals"></div><div class="bar"><i></i></div>`;
+    tile.style.setProperty("--c", `hsl(${d.hue} 80% 55%)`);
+    tile.title = name;
+    $("phones").appendChild(tile);
+    layoutDirty = true;
+  }
+  const online = d.status === "online";
+  tile.classList.toggle("off", !online);
+  tile.querySelector(".dot").className = "dot " + (online ? "ok" : d.status === "offline" ? "bad" : "");
+  tile.querySelector(".nm").textContent = d.label;
+  const t = d.telemetry;
+  const fresh = online && Date.now() - d.lastSeen < 3000;
+  tile.classList.toggle("fresh", fresh);
+  tile.querySelector(".vals").textContent = d.lastSeen
+    ? `tilt ${fmt(t.tilt ?? 0)}° roll ${fmt(t.roll ?? 0)}°`
+    : online ? "joined" : "left";
+  const tilt = Math.max(-90, Math.min(90, Number(t.tilt) || 0));
+  const bar = tile.querySelector(".bar i");
+  bar.style.left = tilt < 0 ? `${50 + tilt / 1.8}%` : "50%";
+  bar.style.width = `${Math.abs(tilt) / 1.8}%`;
+}
+
+function relayout() {
+  // ESP32 cards first; phones: online first, then by name. Only runs when membership/status changes.
+  const showOff = $("showOffline").checked;
+  const phones = [...devices.entries()].filter(([, d]) => d.kind === "phone")
+    .sort(([a, da], [b, db]) => (db.status === "online") - (da.status === "online") || da.label.localeCompare(db.label, undefined, { numeric: true, sensitivity: "base" }));
+  const pbox = $("phones");
+  let shown = 0;
+  for (const [name, d] of phones) {
+    const el = document.getElementById(cardId(name));
+    if (!el) continue;
+    const vis = showOff || d.status === "online";
+    el.classList.toggle("hidden", !vis);
+    if (vis) shown++;
+    pbox.appendChild(el);   // appendChild moves it: cheap reorder
+  }
+  let empty = pbox.querySelector(".empty");
+  if (!shown && !empty) { empty = document.createElement("div"); empty.className = "empty"; pbox.prepend(empty); }
+  if (shown && empty) empty.remove();
+  if (empty) empty.textContent = phones.length ? `${phones.length} phone(s) offline. Tick "show offline" to see them.` : "No phones yet. Show the QR code!";
+
+  if (![...devices.values()].some(d => d.kind === "esp32") && !$("esps").querySelector(".device, .empty")) {
+    $("esps").innerHTML = `<div class="empty">No ESP32 yet. Connect, then power your board.</div>`;
+  }
+}
+
+function updateStats() {
+  let esp = 0, ph = 0;
+  for (const d of devices.values()) if (d.status === "online") { if (d.kind === "esp32") esp++; else if (d.kind === "phone") ph++; }
+  $("sEsp").textContent = esp;
+  $("sPhones").textContent = ph;
+}
+
+let lastRateAt = Date.now();
+setInterval(() => {
+  // 1) repaint the devices that changed
+  for (const name of dirty) {
+    const d = devices.get(name);
+    if (!d) continue;
+    if (d.kind === "esp32") renderEsp(name, d);
+    else if (d.kind === "phone") renderPhone(name, d);
+  }
+  dirty.clear();
+  // phones stop glowing when their stream stops
+  for (const el of document.querySelectorAll(".phone.fresh")) {
+    const d = devices.get(el.title);
+    if (!d || Date.now() - d.lastSeen >= 3000) el.classList.remove("fresh");
+  }
+  if (layoutDirty) { layoutDirty = false; relayout(); }
+  updateStats();
+  // 2) chart
+  if (chartDirty) { chartDirty = false; updateChart(); }
+  // 3) log
+  flushLog();
+  // 4) rate
+  const now = Date.now();
+  if (now - lastRateAt >= 1000) {
+    $("sRate").textContent = Math.round(msgCount * 1000 / (now - lastRateAt));
+    msgCount = 0; lastRateAt = now;
+  }
+}, RENDER_MS);
+$("showOffline").onchange = () => { layoutDirty = true; };
+
+// ---------- chart ----------
+let chartDirty = false;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const chart = new Chart($("chart"), {
+  type: "line",
+  data: { datasets: [] },
+  options: {
+    animation: false, responsive: true, maintainAspectRatio: false, parsing: false, normalized: true,
+    scales: {
+      x: { type: "linear", ticks: { color: css("--muted"), maxTicksLimit: 8, callback: (v) => new Date(v).toLocaleTimeString() },
+           grid: { color: css("--grid") } },
+      y: { beginAtZero: false, ticks: { color: css("--muted") }, grid: { color: css("--grid") } },
+    },
+    plugins: { legend: { position: "bottom", labels: { color: css("--text"), boxWidth: 12 } }, tooltip: { enabled: true } },
+    elements: { point: { radius: 0 }, line: { tension: .3, borderWidth: 2 } },
+  },
+});
+const byName = new Map();   // keep dataset objects stable between updates
+function updateChart() {
+  const metric = $("metric").value;
+  const cutoff = Date.now() - CHART_WINDOW_MS;
+  const sets = [];
+  for (const [name, d] of devices) {
+    const s = d.series[metric];
+    if (!s || !s.length || s[s.length - 1].x < cutoff) continue;
+    let ds = byName.get(name);
+    const color = `hsl(${d.hue} 80% 55%)`;
+    if (!ds) { ds = { label: d.label, borderColor: color, backgroundColor: color, data: [] }; byName.set(name, ds); }
+    ds.label = d.label;
+    ds.data = s;
+    sets.push(ds);
+  }
+  chart.data.datasets = sets;
+  chart.options.plugins.legend.display = sets.length <= 12;
+  chart.options.elements.line.borderWidth = sets.length > 30 ? 1 : 2;
+  chart.update("none");
+}
+$("metric").onchange = () => { chartDirty = true; };
+// keep the time axis sliding even when nobody sends
+setInterval(() => { chartDirty = true; }, 2000);
+
+// ---------- publish ----------
+function publish(topic, payload, qos, retain) {
+  if (!client || !client.connected) { log("not connected", "out"); return; }
+  client.publish(topic, payload, { qos, retain });
+  log(`→ ${topic}${retain ? " [retain]" : ""}  ${payload}`, "out");
+}
+$("btnPublish").onclick = () =>
+  publish($("pubTopic").value.trim(), $("pubPayload").value, Number($("pubQos").value), $("pubRetain").value === "true");
+
+// Clean up: an empty retained message deletes the retained one on the broker.
+let cleanArmed = 0;
+$("btnClean").onclick = () => {
+  const off = [...devices.entries()].filter(([, d]) => d.kind === "phone" && d.status !== "online").map(([n]) => n);
+  if (!off.length) { log("no offline phones to clean", "out"); return; }
+  if (Date.now() - cleanArmed > 4000) {
+    cleanArmed = Date.now();
+    $("btnClean").textContent = `Click again to delete ${off.length}`;
+    setTimeout(() => { $("btnClean").textContent = "Clean up offline"; }, 4000);
+    return;
+  }
+  cleanArmed = 0;
+  $("btnClean").textContent = "Clean up offline";
+  for (const n of off) {
+    for (const s of ["status", "info"]) client.publish(`${PREFIX}/${n}/${s}`, "", { qos: 1, retain: true });
+    devices.delete(n); removeCard(n); byName.delete(n);
+  }
+  layoutDirty = true; chartDirty = true;
+  log(`cleared retained messages of ${off.length} offline phone(s)`, "out");
+};
+
+// ---------- log (buffered: 100 msg/s must not freeze the page) ----------
+const logBuf = [];
+function log(text, cls = "") {
+  if ($("logPause").checked && cls !== "out") return;
+  logBuf.push([new Date().toLocaleTimeString(), text, cls]);
+  if (logBuf.length > 200) logBuf.splice(0, logBuf.length - 200);
+}
+function flushLog() {
+  if (!logBuf.length) return;
+  const el = $("log");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const frag = document.createDocumentFragment();
+  for (const [ts, text, cls] of logBuf) {
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = ts + "  ";
+    line.append(t, document.createTextNode(text));
+    frag.appendChild(line);
+  }
+  logBuf.length = 0;
+  el.appendChild(frag);
+  while (el.childNodes.length > 300) el.firstChild.remove();
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+$("btnClear").onclick = () => { $("log").textContent = ""; };
+
+setConn("", "Disconnected");
+})();
+</script>
+</body>
+</html>
